@@ -5,3 +5,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "PaymentSolution"
 include(":upi-intent-wrapper")
+include(":sample")
+project(":sample").projectDir = file("samples/android-app")

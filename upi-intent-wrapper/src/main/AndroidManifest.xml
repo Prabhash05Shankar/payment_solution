@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Package visibility for upi://pay. Merged into the host app. No permissions are required. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />

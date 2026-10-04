@@ -1,13 +1,17 @@
 plugins {
-    id("com.android.library")
+    id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
 android {
-    namespace = "com.prabhash.payments.upi"
+    namespace = "com.prabhash.payments.upi.sample"
     compileSdk = 35
     defaultConfig {
+        applicationId = "com.prabhash.payments.upi.sample"
         minSdk = 23
-        consumerProguardFiles("consumer-rules.pro")
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -15,7 +19,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 }
+
 dependencies {
-    api("androidx.activity:activity-ktx:1.9.3")
-    testImplementation("junit:junit:4.13.2")
+    implementation(project(":upi-intent-wrapper"))
 }

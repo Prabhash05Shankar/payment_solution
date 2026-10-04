@@ -1,0 +1,49 @@
+Continue working on the existing UPI Intent Wrapper repository. Do not rewrite the library or change its public API unnecessarily.
+
+### Objective
+Fix payment-attempt lifecycle management, prevent late callbacks from being associated with the wrong payment, and improve the reliability of the Android sample.
+
+### Requirements
+
+1. Inspect the current `UpiResultDispatcher`, intent launcher, Activity Result handling, and sample payment screen.
+
+2. Implement a clear payment-attempt lifecycle with unique attempt identifiers and explicit states, such as:
+   - IDLE
+   - LAUNCHING
+   - WAITING_FOR_RESULT
+   - RESULT_RECEIVED
+   - RESULT_UNKNOWN
+   - LAUNCH_FAILED
+
+   Adapt these states to the existing architecture instead of adding unnecessary complexity.
+
+3. Prevent concurrent payment attempts from overwriting each other's callbacks or state. Define what happens when a caller tries to start another payment while one is active. Return a clear error or reject the second attempt.
+
+4. Ensure a late result cannot accidentally complete a newer attempt. Use the Android activity-result lifecycle and a safe attempt-correlation design. Do not claim that an external UPI app's response can always be reliably correlated if the app does not return a trustworthy reference.
+
+5. Handle missing callbacks, cancellation, Activity recreation, process recreation where practical, and repeated callback delivery. Do not interpret a timeout or missing result as payment failure.
+
+6. Update the sample UI so that users cannot accidentally launch duplicate payments. Make retry behavior explicit and safe. Re-enable the payment button when appropriate, without silently discarding an active attempt.
+
+7. Preserve the existing behavior:
+   - Request validation and URI encoding
+   - Generic UPI app discovery without hardcoded app names
+   - Defensive response parsing
+   - `isAuthoritativelyVerified = false`
+   - Existing Gradle and Kotlin versions
+
+8. Add deterministic unit tests for concurrent attempts, duplicate callbacks, stale results, launch failures, missing results, and lifecycle-related state transitions wherever testable. Do not write flaky tests that depend on actual UPI apps.
+
+9. Update the README and integration documentation to explain callback limitations, attempt states, retry behavior, and the difference between a client-reported result and verified payment.
+
+10. Run:
+   - `.\gradlew.bat clean`
+   - `.\gradlew.bat test`
+   - `.\gradlew.bat assemble`
+
+   Report actual outcomes. Do not claim device-level testing unless it was performed.
+
+11. Review `git status` and the final diff. Preserve the staged removal of generated files and all user changes. Do not commit or push unless explicitly authorized.
+
+### Final report
+Summarize the implementation, files changed, tests added, build results, remaining risks, and any scenarios that still require testing on physical devices with real UPI applications.
