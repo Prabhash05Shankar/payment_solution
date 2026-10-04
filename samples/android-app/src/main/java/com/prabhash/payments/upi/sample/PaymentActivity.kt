@@ -7,6 +7,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import com.prabhash.payments.upi.UpiAttemptSnapshot
+import java.util.UUID
 import com.prabhash.payments.upi.UpiAttemptState
 import com.prabhash.payments.upi.UpiErrorCode
 import com.prabhash.payments.upi.UpiIgnoreReason
@@ -23,9 +24,10 @@ import com.prabhash.payments.upi.UpiResultDispatcher
  * Minimal host screen.
  *
  * A production app receives the payee, amount, and transaction reference from its backend.
- * The values below are placeholders. [upiLauncher] is registered as a property so it exists
- * before the Activity is started. Attempt state is restored from the saved instance before
- * that, including after process death.
+ * Each Pay tap here uses a new reference so a delayed reply cannot match the next tap.
+ * [upiLauncher] is registered as a property so it exists before the Activity is started.
+ * Saved attempt state is restored in [onCreate], after [super.onCreate] and before the
+ * Activity is started, including after process death.
  */
 class PaymentActivity : ComponentActivity() {
     private val dispatcher = UpiResultDispatcher()
@@ -33,8 +35,10 @@ class PaymentActivity : ComponentActivity() {
     private lateinit var payButton: Button
     private lateinit var inconclusiveButton: Button
     private lateinit var statusView: TextView
+    private var callbackRenderedThisLaunch = false
 
     private val upiLauncher = registerForActivityResult(UpiPaymentContract()) { response ->
+        callbackRenderedThisLaunch = true
         when (val binding = dispatcher.onActivityResult(response)) {
             is UpiResultBinding.Accepted -> showAttempt(binding.attempt)
             is UpiResultBinding.Ignored -> showIgnoredResult(binding.reason)
@@ -73,7 +77,7 @@ class PaymentActivity : ComponentActivity() {
             payeeAddress = "merchant@upi",
             payeeName = "Example Merchant",
             amount = "10.00",
-            transactionRef = "ORDER-123",
+            transactionRef = newSampleTransactionRef(),
             transactionNote = "Order payment"
         )
         val errors = request.validate()
@@ -81,6 +85,7 @@ class PaymentActivity : ComponentActivity() {
             statusView.text = errors.joinToString("\n")
             return
         }
+        callbackRenderedThisLaunch = false
         val started = UpiPayments.launch(
             dispatcher = dispatcher,
             launcher = upiLauncher,
@@ -88,7 +93,7 @@ class PaymentActivity : ComponentActivity() {
             onLaunchError = ::showLaunchError,
             onAttemptRejected = ::showRejectedAttempt
         )
-        if (started != null && started.launchError == null) {
+        if (started != null && started.launchError == null && !callbackRenderedThisLaunch) {
             showAttempt(started)
         }
     }
@@ -119,10 +124,19 @@ class PaymentActivity : ComponentActivity() {
 
     private fun showIgnoredResult(reason: UpiIgnoreReason) {
         showAttempt(dispatcher.attempt)
-        if (reason != UpiIgnoreReason.STALE_REFERENCE && reason != UpiIgnoreReason.UNCORRELATED) return
-        statusView.text = "A UPI response arrived, but it could not be matched to the payment on this screen. " +
-            "It was not applied. Check the earlier order on your backend.\n\n" +
-            statusView.text
+        when (reason) {
+            UpiIgnoreReason.STALE_REFERENCE, UpiIgnoreReason.UNCORRELATED -> {
+                statusView.text = "A UPI response arrived, but it could not be matched to the payment on this screen. " +
+                    "It was not applied, and the order was not marked paid or failed. " +
+                    "Check the earlier order on your backend.\n\n" +
+                    statusView.text
+            }
+            UpiIgnoreReason.NO_ACTIVE_ATTEMPT -> {
+                statusView.text = "A UPI response arrived, but this screen has no payment to attach it to. " +
+                    "It was not applied. The order was not marked paid or failed. Check your backend."
+            }
+            UpiIgnoreReason.ATTEMPT_NOT_WAITING -> Unit
+        }
     }
 
     private fun showAttempt(attempt: UpiPaymentAttempt?) {
@@ -146,9 +160,9 @@ class PaymentActivity : ComponentActivity() {
                 (attempt.launchError?.message ?: "The UPI app was not opened.") +
                     " Order ${attempt.transactionRef} was not marked failed. You can try again."
             UpiAttemptState.RESULT_UNKNOWN ->
-                "No client result for ${attempt.transactionRef}. This is not a failed payment. " +
+                "No client result for ${attempt.transactionRef}. This is not a failed or paid payment. " +
                     "Check your backend before starting another payment. " +
-                    "A delayed UPI reply will be applied to a new attempt only when that reply includes the same transaction reference."
+                    "A delayed UPI reply is applied to a new payment only when it echoes that payment's own transaction reference."
             UpiAttemptState.RESULT_RECEIVED -> clientResultMessage(attempt)
         }
     }
@@ -174,6 +188,11 @@ class PaymentActivity : ComponentActivity() {
             "\nBackend status: ${verified.name}." +
             "\nDo not fulfill the order from the UPI callback."
     }
+}
+
+private fun newSampleTransactionRef(): String {
+    val compact = UUID.randomUUID().toString().replace("-", "")
+    return "ORD$compact"
 }
 
 private const val KEY_SAVED = "upi_attempt_saved"

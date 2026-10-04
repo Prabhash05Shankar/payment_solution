@@ -52,6 +52,8 @@ The module exposes AndroidX Activity as an `api` dependency, because `UpiPayment
 
 `samples/android-app` is a minimal host that compiles against this API. It is not a payment backend.
 
+How to wire this into an Android app, and how to add the Flutter or React Native bridge that this repository does not ship, is in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
+
 ## Payment request
 
 ```kotlin
@@ -96,5 +98,6 @@ The unit tests cover request validation, URI encoding, response parsing, missing
 
 - UPI intent parameters other than `pa`, `pn`, `am`, `cu`, `tr`, and optional `tn` are not sent. Merchant category, terminal id, and signed-intent fields are omitted on purpose.
 - iOS cannot use this Android intent. A Flutter or React Native host still needs a separate iOS design, which this repository does not provide.
-- Client responses can omit `txnId`, `txnRef`, `ApprovalRefNo`, and `responseCode`. The parser keeps whatever is present and leaves the rest null. After an unresolved attempt, a newer attempt ignores a callback that does not echo its `txnRef`.
-- The sample keeps Pay disabled until the open attempt receives a result, fails to launch, or the user taps "I returned without a result". Coming back to the Activity does not clear that attempt.
+- Client responses can omit `txnId`, `txnRef`, `ApprovalRefNo`, and `responseCode`. The parser keeps whatever is present and leaves the rest null. After an unresolved attempt, later attempts ignore a callback that does not echo their own `txnRef`. That requirement survives a later matching result and process death. Reusing a `transactionRef` lets the old callback complete the newer attempt.
+- The sample keeps Pay disabled until the open attempt receives a result, fails to launch, or the user taps "I returned without a result". Coming back to the Activity does not clear that attempt. Each Pay tap uses a new reference. A production app gets that reference from its backend.
+- If the process dies before the first `onSaveInstanceState`, the attempt is gone. A callback that still arrives is ignored and does not mark the order paid or failed. The backend reconciles the reference it issued.

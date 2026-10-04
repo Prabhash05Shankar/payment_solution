@@ -73,10 +73,13 @@ data class UpiAttemptSnapshot(
  *
  * Android delivers every result for one registered launcher to the same callback, with no attempt
  * id. This class therefore keeps only one outstanding launch. A callback is applied to that launch
- * only. After an attempt ends without a bound result, a later attempt accepts a callback only when
- * the payload's transaction reference equals that later attempt. A payload with no reference is
- * left unbound, because it cannot be told apart from the earlier launch. A UPI app is not required
- * to return `txnRef`.
+ * only. After an attempt ends without a bound result, every later attempt accepts a callback only
+ * when the payload's transaction reference equals that later attempt. A payload with no reference
+ * is left unbound, because it cannot be told apart from the earlier launch. That requirement stays
+ * in place after a later attempt receives a matching result, and [snapshot] keeps it, because an
+ * older callback can still arrive. It clears when the outstanding callback is bound to the original
+ * attempt before another attempt starts. Reusing the same transaction reference makes an old
+ * callback look like it belongs to the newer attempt. A UPI app is not required to return `txnRef`.
  *
  * Save [snapshot] in instance state and pass it to [restore] after recreation, including process
  * death. Do that before the Activity is started, so a pending activity result is applied to the

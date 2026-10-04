@@ -151,6 +151,43 @@ class UpiAttemptLifecycleTest {
         assertFalse(second.attempt.requiresReferenceMatch)
     }
 
+    @Test fun reusedTransactionRefLetsAnOlderPayloadCompleteTheNewerAttempt() {
+        val dispatcher = unresolvedThenWaiting(firstRef = "ORDER-1", secondRef = "ORDER-1")
+        val binding = dispatcher.onActivityResult(
+            UpiResponse(UpiPaymentStatus.SUCCESS, transactionRef = "ORDER-1")
+        )
+
+        val accepted = binding as UpiResultBinding.Accepted
+        assertEquals("a2", accepted.attempt.id)
+        assertEquals(UpiPaymentStatus.SUCCESS, accepted.attempt.clientResponse?.status)
+        assertFalse(accepted.attempt.clientResponse!!.isAuthoritativelyVerified)
+    }
+
+    @Test fun matchingALaterAttemptDoesNotDropTheReferenceRequirement() {
+        val dispatcher = unresolvedThenWaiting("ORDER-1", "ORDER-2")
+        dispatcher.onActivityResult(
+            UpiResponse(UpiPaymentStatus.SUCCESS, transactionRef = "ORDER-2")
+        )
+
+        val third = dispatcher.tryStart("ORDER-3") as UpiAttemptStart.Started
+        assertTrue(third.attempt.requiresReferenceMatch)
+        val binding = dispatcher.onActivityResult(UpiResponse(UpiPaymentStatus.SUCCESS))
+        assertEquals(UpiIgnoreReason.UNCORRELATED, (binding as UpiResultBinding.Ignored).reason)
+        assertEquals("a3", dispatcher.attempt?.id)
+        assertNull(dispatcher.attempt?.clientResponse)
+    }
+
+    @Test fun bindingTheOutstandingCallbackToTheOriginalAttemptClearsTheMatchRequirement() {
+        val dispatcher = waiting("ORDER-1")
+        dispatcher.markInconclusive(dispatcher.attempt!!.id)
+        dispatcher.onActivityResult(
+            UpiResponse(UpiPaymentStatus.PENDING, transactionRef = "ORDER-1")
+        )
+
+        val next = dispatcher.tryStart("ORDER-2") as UpiAttemptStart.Started
+        assertFalse(next.attempt.requiresReferenceMatch)
+    }
+
     @Test fun resultWithNoAttemptIsIgnored() {
         val binding = dispatcher().onActivityResult(UpiResponse(UpiPaymentStatus.SUCCESS))
         assertEquals(UpiIgnoreReason.NO_ACTIVE_ATTEMPT, (binding as UpiResultBinding.Ignored).reason)

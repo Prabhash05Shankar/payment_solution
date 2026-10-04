@@ -43,15 +43,20 @@ class PaymentActivity : ComponentActivity() {
 
 Call `markInconclusive(attemptId)` only from an explicit user action while the state is `WAITING_FOR_RESULT`. Do not call it from a timer. Do not treat that transition, or a missing callback, as payment failure or cancellation.
 
-Retry is a new `UpiPayments.launch` after the state is `RESULT_RECEIVED`, `RESULT_UNKNOWN`, `LAUNCH_FAILED`, or `IDLE`. The sample keeps Pay disabled during `LAUNCHING` and `WAITING_FOR_RESULT`. It shows a separate "I returned without a result" action. Pay is enabled again only after that action, a bound result, or a launch failure. Returning to the screen does not clear the open attempt.
+Retry is a new `UpiPayments.launch` after the state is `RESULT_RECEIVED`, `RESULT_UNKNOWN`, `LAUNCH_FAILED`, or `IDLE`. The sample keeps Pay disabled during `LAUNCHING` and `WAITING_FOR_RESULT`. It shows a separate "I returned without a result" action. Pay is enabled again only after that action, a bound result, or a launch failure. Returning to the screen does not clear the open attempt. The sample creates a new `transactionRef` on every Pay tap. A production app uses the reference issued by its backend instead.
 
-Persist `dispatcher.snapshot()` in `onSaveInstanceState` and call `dispatcher.restore` in `onCreate` before the Activity is started. Android can then deliver a pending result to the restored attempt after rotation or process death. The sample does this. The snapshot stores the attempt id, reference, state, and parsed client status. It does not store `rawResponse`.
+Persist `dispatcher.snapshot()` in `onSaveInstanceState` and call `dispatcher.restore` in `onCreate`, after `super.onCreate` and before the Activity is started. Do not restore in `onStart` or `onResume`. Android delivers a pending activity result when the Activity reaches the started state, so restoring earlier attaches that result to the same attempt after rotation or process death. The sample does this.
+
+The snapshot stores the attempt id, `transactionRef`, state, whether this attempt requires a matching reference, whether an older callback may still arrive, and the parsed client status enum when a result was bound. It does not store `rawResponse`, the launch exception, the transaction id, the approval reference, the response code, or the parser message. A recreated screen can show the client status and still must not treat it as settlement. `isAuthoritativelyVerified` stays false.
+
+If the process is killed before the first `onSaveInstanceState`, both the attempt and Android's pending activity-result record are gone. A callback that still reaches the new screen finds no attempt (`NO_ACTIVE_ATTEMPT`) and is ignored. It does not mark the order paid or failed. The merchant backend reconciles that order by asking the acquiring bank or payment provider for the `transactionRef` it issued. Silence, `RESULT_UNKNOWN`, `LAUNCH_FAILED`, and a client `SUCCESS` are all unresolved until that check.
 
 Android gives every result for one registered launcher to the same callback and does not include this library's attempt id. A UPI app might also omit `txnRef`. Correlation is therefore limited:
 
 - While one attempt is outstanding, a callback is bound to that attempt. A repeated callback is ignored.
 - A callback whose `transactionRef` differs from the open attempt is ignored. The open attempt stays unchanged.
-- If an attempt ends without a bound result, the next attempt accepts a callback only when `transactionRef` equals that next attempt. A payload with no reference is not applied to the newer attempt. Check the earlier order on the backend.
+- If an attempt ends without a bound result, every later attempt accepts a callback only when `transactionRef` equals that later attempt. A payload with no reference is not applied. This remains true after a later attempt receives a matching result, and it survives restore, because the older callback can still arrive. The requirement clears when that callback is bound to the original attempt before another attempt starts.
+- The same `transactionRef` on two attempts is not a correlation key. An old payload that echoes that shared reference is applied to the newer attempt. Create a new reference for every attempt.
 - This library cannot prove that an external UPI response belongs to a launch when the app does not return a matching reference.
 
 `UpiPaymentContract.createIntent` throws `UpiPaymentException` before the UPI app opens when the request is invalid or no app can handle `upi://pay`. Calling `upiLauncher.launch(request)` yourself requires the same `try/catch`.
@@ -66,7 +71,7 @@ The library does not retain an Activity. Do not store one in your own callback l
 | `payeeName` | `pn` | Required. At most 99 characters. No control characters. |
 | `amount` | `am` | Required. Greater than zero and less than 100000000. `.` separator, at most two decimal places. `10` is sent as `10.00`. |
 | `currency` | `cu` | `INR` only. The default is `INR`. |
-| `transactionRef` | `tr` | Required by this library. 1 to 35 characters: letters, digits, `.`, `_`, `-`. Create it on the backend. |
+| `transactionRef` | `tr` | Required by this library. 1 to 35 characters: letters, digits, `.`, `_`, `-`. The backend creates a new value for every attempt. Reusing one lets an old callback complete the newer attempt. |
 | `transactionNote` | `tn` | Optional. At most 50 characters. Omitted when blank. `&`, spaces, and other non-control characters are encoded. |
 
 `validate()` returns messages. `fieldErrors()` returns `field`, `code` (`required`, `invalid`, `not_positive`, `precision`, `unsupported`, `too_long`), and `message`.
@@ -149,6 +154,7 @@ There is no backend in this repository. The contract below is illustrative. It i
 6. The backend asks the acquiring bank or payment provider for the status of that reference. It checks the amount, currency, merchant, and that the reference belongs to this order.
 7. The backend updates its payment row idempotently. A repeated verification call for a paid order stays paid and does not ship the order twice.
 8. The app reads the verified status from the backend. Pending and delayed provider updates stay pending until the provider's timeout or a later check. Poll or refresh. Do not treat silence from the UPI app as a final failure.
+9. `RESULT_UNKNOWN`, a missing callback, `LAUNCH_FAILED`, an ignored callback, and a client status of `SUCCESS` leave the order unresolved. The backend is the only place that may set it paid or failed, and only after the provider check for that same `transactionRef`.
 
 Illustrative create request:
 
@@ -221,7 +227,7 @@ The sample's `UnconfiguredMerchantBackend` always returns `UNKNOWN`. Replace it 
 
 ## Flutter
 
-No Flutter plugin is in this repository. Cross-platform support is not implemented.
+No Flutter plugin is in this repository. Cross-platform support is not implemented. The host code to add, including `markReturnedWithoutResult`, is in [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 A plugin should add this Android module to the host app and call it from an `ActivityAware` plugin. Validation and parsing stay in the Kotlin library. The Dart side should not rebuild those rules.
 
@@ -277,7 +283,7 @@ Missing work: the Flutter package, Dart API, example app, plugin registration, a
 
 ## React Native
 
-No React Native module is in this repository. The same request, response, and error JSON as the Flutter section should be the contract, so the two hosts do not drift.
+No React Native module is in this repository. The same request, response, and error JSON as the Flutter section should be the contract, so the two hosts do not drift. Step-by-step host code is in [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 A native module named `UpiIntent` can expose `launchPayment(request): Promise`. Implement it with `ReactApplicationContext`'s current Activity, `UpiPaymentContract`, and one `UpiResultDispatcher` retained across reloads of the UI. Do not copy the parser into JavaScript. Reject the promise with `INVALID_REQUEST`, `NO_UPI_APP`, `LAUNCH_FAILED`, or `ATTEMPT_IN_PROGRESS`. Resolve a missing or unmatched client reply as `status: "UNKNOWN"` instead of rejecting it, and include the attempt state `RESULT_UNKNOWN` when the user left without a callback.
 
